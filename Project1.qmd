@@ -48,4 +48,39 @@ We needed to do some extra edits in our function to make sure that we get the va
 tibble_maker("https://api.census.gov/data/2022/acs/acs1/pums?get=SEX,PWGTP,MAR&SCHL=24", test_tibble)
 ```
 
-Great, we now have the tibble_maker() function which will take API census data and convert it into the desired tibble format. Next, we can proceed to work on
+Great, we now have the tibble_maker() function which will take API census data and convert it into the desired tibble format. Next, we can proceed to work on the function that allows a user to specify how to adjust their API call. We want to include:
+
+-   Year (2022 as default, 2010 - 2022 as options)
+
+-   Numeric Variables (AGEP, PWGTP as default. Options are AGEP, GASP, GRPIP, JWAP, JWDP, and JWMNP. PWGTP and one other Numeric variable must be returned)
+
+-   Categorical Variables (SEX as default. Options are FER, HHL, HISPEED, JWAP, JWDP, JWTRNS, SCH, SCHL, and SEX. One categorical variable must be returned)
+
+```{r}
+one_year_api = function(year = 2022, num = 'AGEP', cat = 'SEX'){
+  # set the accepted values for each type of variable
+  num_list = c('AGEP', 'GASP', 'GRPIP', 'JWAP', 'JWDP','JWMNP') 
+  cat_list = c('FER', 'HHL', 'HISPEED', 'JWAP', 'JWDP', 'JWTRNS', 'SCH', 'SCHL','SEX')
+  num2 = 'PWGTP' # the num variable that is always used
+  if (between(year,2010,2022)){
+    print('Year is in range')} else {
+      stop('Year must be between 2010 - 2022')
+    }
+  if (num %in% num_list){
+    print('Numerical variable selected')} else {
+      stop('Make sure numerical variable is in list: AGEP, GASP, GRPIP, JWAP, JWDP, JWMNP')
+    }
+  if (cat %in% cat_list){
+    print('Categorical variable selected')} else {
+      stop('Make sure the (1) categorical variable is in list: FER, HHL, HISPEED, JWAP, JWDP, JWTRNS, SCH, SCHL,SEX')
+    }
+  # now that we have everything appropriately selected, we can write the API call
+  api_url = as.character(paste('https://api.census.gov/data/',year,'/acs/acs1/pums?get=',num,',',cat,',PWGTP', sep=''))
+  print(api_url)
+  returned_tibble = tibble_maker(api_url, test_tibble)
+  return(returned_tibble)
+}
+test_api = one_year_api()
+
+
+```
