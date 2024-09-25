@@ -1,0 +1,51 @@
+---
+title: "Project 1 - API Census Data"
+author: "Patrick Seebold"
+format: html
+editor: visual
+---
+
+## Setting up an API for Census Data
+
+In this project, I will establish an API to allow a user to access census data from –. First, let's grab the appropriate packages.
+
+```{r}
+library('jsonlite') # for handling json data from our APIs
+library('tidyverse') # for those beautiful tibble functions
+```
+
+Before we start writing the functions that let our users specify custom APIs, let's go ahead and test out the 'usual method' covered in class to get an API. This will let us confirm that we can get the data we want without a key and investigate the format it returns our data in
+
+```{r}
+d = httr::GET(url = "https://api.census.gov/data/2022/acs/acs1/pums?get=SEX,PWGTP,MAR&SCHL=24")
+str(d)
+```
+
+Looks like it worked! We now have a sample dataset in json format. We can use the jsonlite package to process this into a tibble, which will be more user-friendly for the our tidyverse methods.
+
+```{r}
+parsed = fromJSON(rawToChar(d$content))
+parsed # check that the conversion out of JSON format worked
+```
+
+Great, we got the data into a character matrix using the method we discussed in class! However, we want it to be in a tibble, not in a matrix. Let's go ahead and make a function that will let us convert GET() output into tibble format:
+
+```{r}
+tibble_maker = function(input_url, tibble_name){
+  d = httr::GET(input_url) # get the data from the URL
+  parse = fromJSON(rawToChar(d$content)) # convert this our of JSON format
+  colnames(parse) = parse[1,] # names are in the first row, so grab these
+  tibble_name = as_tibble(parse, .name_repairs = 'unique') # specify rownames are in matrix
+  tibble_name = tibble_name[-1,]# drop the row which has the tibble names in it
+  return(tibble_name)
+}
+
+```
+
+We needed to do some extra edits in our function to make sure that we get the variable names in the right place, but after some trial and error, we got it! Now we test the function to confirm it works:
+
+```{r}
+tibble_maker("https://api.census.gov/data/2022/acs/acs1/pums?get=SEX,PWGTP,MAR&SCHL=24", test_tibble)
+```
+
+Great, we now have the tibble_maker() function which will take API census data and convert it into the desired tibble format. Next, we can proceed to work on
