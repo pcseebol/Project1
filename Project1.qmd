@@ -60,7 +60,7 @@ Great, we now have the tibble_maker() function which will take API census data a
 -   Location - State 19 as default, options are ALL, REGION, DIVISION, STATE.
 
 ```{r}
-one_year_api = function(year = 2022, num = 'AGEP', cat = 'SEX', loc = "STATE"){
+one_year_api = function(year = 2022, num = 'AGEP', cat = 'SEX', loc = "STATE:19"){
   
   # set the accepted values for each type of variable
   num_list = c('AGEP', 'GASP', 'GRPIP', 'JWAP', 'JWDP','JWMNP') 
@@ -83,10 +83,10 @@ one_year_api = function(year = 2022, num = 'AGEP', cat = 'SEX', loc = "STATE"){
       stop('Make sure the (1) categorical variable is in list: FER, HHL, HISPEED, JWAP, JWDP, JWTRNS, SCH, SCHL,SEX')
     }
   
-  if (loc %in% loc_list){
-    print('Location variable selected')} else {
-      stop('Location must be (1) from list: ALL, DIVISION, REGION, STATE')
-  }
+  #if (loc %in% loc_list){
+  #  print('Location variable selected')} else {
+  #    stop('Location must be (1) from list: ALL, DIVISION, REGION, STATE')
+  #}
   
   # now that we have everything appropriately selected, we can write the API call
   if (loc == "ALL"){ # if we don't specify location, no need for specifying where
@@ -100,21 +100,8 @@ one_year_api = function(year = 2022, num = 'AGEP', cat = 'SEX', loc = "STATE"){
   returned_tibble[[1]] = as.numeric(returned_tibble[[1]]) # specify correct variable type by column;
   returned_tibble[[2]] = as.factor(returned_tibble[[2]])  # we can do this by indexing since we know
   returned_tibble[[3]] = as.numeric(returned_tibble[[3]])
-   if (num == "JWAP"){
-     
-     
-     
-    separate_wider_delim function to isolate times from the time range string, and then a combination of dplyr's mutate, lubridate's parse_hm and a basic arithmetic calculation to find the midpoin
-    
-    returned_tibble$JWAP = returned_tibble$JWAP*2.5 # convert to minutes since midnight, aligned with midpoint of each interval. 0 is not effected.
-   }
-  if (num == "JWDP"){
-    print('AHHHHHHHHHHHHHHHHH!!!!!!!') # need a way to standardize this
-  }
-return(returned_tibble)
-}
-test_api = one_year_api(year= 2010, num="JWAP", cat = "SEX", loc = "DIVISION")
-test_api
+  # if (num == "JWAP"){
+        }
 ```
 
 Cool, now we have a function that gives us some customizable options for calling from the census API! However, it is possible that we want data from more than 1 year. Let's write another function that wraps around our one_year_api() function so that we can get a tibble with up to four years of data:
@@ -125,10 +112,10 @@ multi_year_api(year = c(2022, 1000, 1000), num="JWAP", cat = "SEX", loc = "DIVIS
 ```
 
 ```{r}
-#get the JWAP info
-    temp <- httr::GET("https://api.census.gov/data/2022/acs/acs1/pums/variables/JWDP.json")
+# This code block based on example provided by Dr. J. Post:
+    temp = httr::GET("https://api.census.gov/data/2022/acs/acs1/pums/variables/JWDP.json")
     #turn it into a list
-    temp_list <- temp$content |> rawToChar() |>jsonlite::fromJSON()
+    temp_list = temp$content |> rawToChar() |>jsonlite::fromJSON()
     #grab just the names of JWAP and their values
     
     
@@ -180,6 +167,9 @@ test
 ```
 
 ```{r}
+one_year_api()
+
+
 
 summary.census <- function(tibble, num_var, cat_var){
 sum = sum(num_var*)
