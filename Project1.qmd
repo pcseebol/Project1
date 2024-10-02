@@ -7,7 +7,7 @@ editor: visual
 
 ## Setting up an API for Census Data
 
-In this project, I will establish an API to allow a user to access census data from –. First, let's grab the appropriate packages.
+In this project, I will build an API to allow a user to access census data from –. First, let's grab the appropriate packages.
 
 ```{r}
 library('jsonlite') # for handling json data from our APIs
@@ -15,7 +15,7 @@ library('tidyverse') # for those beautiful tibble functions
 library('lubridate') # for dealing with the time variables
 ```
 
-Before we start writing the functions that let our users specify custom APIs, let's go ahead and test out the 'usual method' covered in class to get an API. This will let us confirm that we can get the data we want without a key and investigate the format it returns our data in
+Before we start writing the functions that let our users specify custom APIs, let's go ahead and test out the 'usual method' covered in class to get make an API call. This will let us confirm that we can get the data we want without a key and investigate the format it returns our data in
 
 ```{r}
 d = httr::GET(url = "https://api.census.gov/data/2022/acs/acs1/pums?get=SEX,PWGTP,MAR&SCHL=24")
@@ -57,8 +57,10 @@ Great, we now have the tibble_maker() function which will take API census data a
 
 -   Categorical Variables (SEX as default. Options are FER, HHL, HISPEED, JWTRNS, SCH, SCHL, and SEX. One categorical variable must be returned)
 
+-   Location - State 19 as default, options are ALL, REGION, DIVISION, STATE.
+
 ```{r}
-one_year_api = function(year = 2022, num = 'AGEP', cat = 'SEX', loc = "ALL"){
+one_year_api = function(year = 2022, num = 'AGEP', cat = 'SEX', loc = "STATE"){
   
   # set the accepted values for each type of variable
   num_list = c('AGEP', 'GASP', 'GRPIP', 'JWAP', 'JWDP','JWMNP') 
@@ -124,16 +126,16 @@ multi_year_api(year = c(2022, 1000, 1000), num="JWAP", cat = "SEX", loc = "DIVIS
 
 ```{r}
 #get the JWAP info
-    temp <- httr::GET("https://api.census.gov/data/2022/acs/acs1/pums/variables/JWAP.json")
+    temp <- httr::GET("https://api.census.gov/data/2022/acs/acs1/pums/variables/JWDP.json")
     #turn it into a list
     temp_list <- temp$content |> rawToChar() |>jsonlite::fromJSON()
     #grab just the names of JWAP and their values
     
     
-convert_to_time = function(input_vec){
-  JWAP <- temp_list$values$item
+convert_to_time = function(input_vec){ # change given vector to time
+    JWAP = temp_list$values$item
     #reorder just so it is clearer
-    JWAP_values <- JWAP[sort(names(JWAP))]
+    JWAP_values = JWAP[sort(names(JWAP))]
     parsed_JWAP = c() # initialize an empty vector
     df = c()
     for (i in 1:length(JWAP_values)){
@@ -144,9 +146,48 @@ convert_to_time = function(input_vec){
     df = data.frame(df)
     parsed_JWAP = separate_wider_delim(df, cols = everything(), delim = " ", names_sep = "")
     parsed_JWAP = parsed_JWAP[-c(2,3,5)]
-    # FIGURE OUT HOW TO GET VALUES OUT OF THIS DF NEXT
-    lubridate::as.difftime(parsed_JWAP[,1], parsed_JWAP[,2])
     return(parsed_JWAP)
 }
-test = convert_to_time(temp_list)
+
+calculate_minutes_to_midnight = function(input_df){ # take parsed JW-P data
+  df=c()                              # return min from midnight to int midpoint
+  df$a = hm(input_df$df1) # convert to hour minute notation!
+  df$b = hm(input_df$df4)
+  df = as.data.frame(df)
+  
+  df$dif = df$b - df$a # calculate the number of mins in each interval
+  
+  df$interval_length = as.numeric(df$dif) # make values numeric for easier math
+  df$interval_length = df$interval_length/60 # put back into minutes
+  df$interval_midpoint = df$interval_length/2 # this gives us the midpoint 
+  for (i in 1:nrow(df)){ # loop through data, calculating midnight from midnight
+    if (i == 1){
+      df$minutes_from_md_to_interval_start[i] = 0
+      df$minutes_from_md_to_interval_midpoint[i] = 2
+    } else {
+    df$minutes_from_md_to_interval_start[i] = 1 + 
+      df$minutes_from_md_to_interval_start[i-1] +
+      df$interval_length[i-1]
+    df$minutes_from_md_to_interval_midpoint[i] =
+      df$minutes_from_md_to_interval_start[i] + df$interval_midpoint[i]
+    }
+  }
+  return(as.data.frame(df$minutes_from_md_to_interval_midpoint))
+}
+test1 = convert_to_time(temp_list)
+test= calculate_minutes_to_midnight(test1)
+test
 ```
+
+```{r}
+
+summary.census <- function(tibble, num_var, cat_var){
+sum = sum(num_var*)
+sum}
+
+
+```
+
+summary.census \<- function(tibble, num_var, cat_var){
+
+sum}
