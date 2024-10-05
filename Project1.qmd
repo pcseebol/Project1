@@ -1,7 +1,7 @@
 ---
 title: "Project 1 - API Census Data"
 author: "Patrick Seebold"
-format: html
+format: pdf
 editor: visual
 ---
 
@@ -13,6 +13,7 @@ In this project, I will build an API to allow a user to access census data from 
 library('jsonlite') # for handling json data from our APIs
 library('tidyverse') # for those beautiful tibble functions
 library('lubridate') # for dealing with the time variables
+library('ggplot2') # for plotting
 ```
 
 Before we start writing the functions that let our users specify custom APIs, let's go ahead and test out the 'usual method' covered in class to get make an API call. This will let us confirm that we can get the data we want without a key and investigate the format it returns our data in
@@ -26,7 +27,7 @@ Looks like it worked! We now have a sample dataset in json format. We can use th
 
 ```{r}
 parsed = fromJSON(rawToChar(d$content))
-parsed # check that the conversion out of JSON format worked
+head(parsed) # check that the conversion out of JSON format worked
 ```
 
 Great, we got the data into a character matrix using the method we discussed in class! However, we want it to be in a tibble, not in a matrix. Let's go ahead and make a function that will let us convert GET() output into tibble format:
@@ -40,8 +41,6 @@ tibble_maker = function(input_url, tibble_name){
   tibble_name = tibble_name[-1,]# drop the row which has the tibble names in it
   return(tibble_name)
 }
-
-
 ```
 
 We needed to do some extra edits in our function to make sure that we get the variable names in the right place, but after some trial and error, we got it! Now we test the function to confirm it works:
@@ -50,15 +49,17 @@ We needed to do some extra edits in our function to make sure that we get the va
 tibble_maker("https://api.census.gov/data/2022/acs/acs1/pums?get=SEX,PWGTP,MAR&SCHL=24", test_tibble)
 ```
 
+## Making the customizable API Function:
+
 Great, we now have the tibble_maker() function which will take API census data and convert it into the desired tibble format. Next, we can proceed to work on the function that allows a user to specify how to adjust their API call. We want to include:
 
--   Year (2022 as default, 2010 - 2022 as options)
+-   Year (2022 as default, 2010 - 2022 as options - note that 2020 is not available and thus excluded)
 
 -   Numeric Variables (AGEP, PWGTP as default. Options are AGEP, GASP, GRPIP, JWAP, JWDP, and JWMNP. PWGTP and one other Numeric variable must be returned)
 
 -   Categorical Variables (SEX as default. Options are FER, HHL, HISPEED, JWTRNS, SCH, SCHL, and SEX. One categorical variable must be returned)
 
--   Location - State 19 as default, options are ALL, REGION, DIVISION, STATE.
+-   Location - STATE:19 as default, options are ALL, REGION, DIVISION, STATE.
 
 ```{r}
 one_year_api = function(year = 2022, num = 'AGEP', cat = 'SEX', loc_type= "STATE", loc_num = "19"){
@@ -69,9 +70,13 @@ one_year_api = function(year = 2022, num = 'AGEP', cat = 'SEX', loc_type= "STATE
   loc_list = c('ALL', 'REGION','DIVISION', 'STATE','')
  
   # check that provided values match options
-   if (between(year,2010,2022)){
-    print('Year is in range')} else {
-      stop('Year must be between 2010 - 2022')
+  if (year != 2020){ 
+    if (between(year,2010,2022)){
+      print('Year is in range')} else {
+        stop('Year must be between 2010 - 2022, excluding 2020')
+      }
+    }else {
+        stop('Data not available for 2020. Please select other year 2010 - 2022')
     }
   
   if (num %in% num_list){
@@ -88,172 +93,221 @@ one_year_api = function(year = 2022, num = 'AGEP', cat = 'SEX', loc_type= "STATE
     print('Location variable selected')} else {
       stop('Location must be (1) from list: ALL, DIVISION, REGION, STATE')
   }
-  
+
   # now that we have everything appropriately selected, we can write the API call
   if (loc_type== "ALL"){ # if we don't specify location, API call is simpler
   api_url = as.character(paste('https://api.census.gov/data/',year,'/acs/acs1/pums?get=',num,',',cat,',PWGTP', sep=''))
   } else { # if location != ALL, set location at end of API call
   api_url = as.character(paste('https://api.census.gov/data/',year,'/acs/acs1/pums?get=',num,',',cat,',PWGTP','&for=',tolower(loc_type),":", loc_num, sep=''))
   }
+  
   # check that our url looks correct
   print(api_url)
   returned_tibble = tibble_maker(api_url, test_tibble)
-  returned_tibble[[1]] = as.numeric(returned_tibble[[1]]) # specify correct variable type by column;
-  returned_tibble[[2]] = as.factor(returned_tibble[[2]])  # we can do this by indexing since we know
-  returned_tibble[[3]] = as.numeric(returned_tibble[[3]])
+  
   # if (num == "JWAP"){
+  return(returned_tibble)
 }
-test = one_year_api()
-test
+test = one_year_api(year = 2021, num = "AGEP")
+str(test)
 ```
 
-Cool, now we have a function that gives us some customizable options for calling from the census API! However, it is possible that we want data from more than 1 year. Let's write another function that wraps around our one_year_api() function so that we can get a tibble with up to four years of data:
+## Making the Helper Functions
+
+Cool, now we have a function that gives us some customizable options for calling from the census API! However, our current tibble_maker function won't handle all the cool conversions we want to be able to do. Let's write some functions that will handle the conversions of interest, which we can then integrate into our updated tibble_maker() function.
+
+First, let's handle our numeric variables. We want to make all of these variables are changed into numerics, and JWAP/JWDP need to be converted to minutes since midnight (using interval midpoints for each given interval). The following functions will handle these changes:
 
 ```{r}
-multi_year_api(year = c(2022, 1000, 1000), num="JWAP", cat = "SEX", loc_type= "DIVISION")
+# This function generates the comparison table for JWAP/JWDP based on which type the user specifies. This comparison df will be used for converting API data to the appropraite minutes-from-midnight form
 
-```
-
-```{r}
-# Functions to convert JWAP/JWDP to minutes, based on example provided by Dr. Post:
-initial_convert_to_time = function(input_url){ # change given vector to time
-    if # ADD CONDITIONAL HERE FOR JWAP VS JWDP
-  temp = httr::GET("https://api.census.gov/data/2022/acs/acs1/pums/variables/JWAP.json")
-    #turn it into a list
+generate_minute_conversion_reference = function(type){ # change given vector to time
+  # first, grab the json appropriate for JWDP or JWAP, as specified by type input  
+  if (type == 'JWAP'){
+      temp = httr::GET("https://api.census.gov/data/2022/acs/acs1/pums/variables/JWAP.json")
+    } else if (type == 'JWDP'){
+      temp = httr::GET("https://api.census.gov/data/2022/acs/acs1/pums/variables/JWDP.json")
+    }
+    #turn reference json  into a list
     temp_list = temp$content |> rawToChar() |>jsonlite::fromJSON()
-    #grab just the names of JWAP and their values
-    JWAP = temp_list$values$item
+    #grab just the names and values
+    j = temp_list$values$item
     #reorder just so it is clearer
-    JWAP_values = JWAP[sort(names(JWAP))]
-    parsed_JWAP = c() # initialize an empty vector
+    j_values = j[sort(names(j))]
+    parsed_j = c() # initialize an empty vector
     df = c()
-    for (i in 1:length(JWAP_values)){
-      df[i] = JWAP_values[[i]]
+    for (i in 1:length(j_values)){
+      df[i] = j_values[[i]]
     }
     df = data.frame(df)
     df = df[-1,]
     df = data.frame(df)
-    parsed_JWAP = separate_wider_delim(df, cols = everything(), delim = " ", names_sep = "")
-    parsed_JWAP = parsed_JWAP[-c(2,3,5)]
-    return(parsed_JWAP)
-}
-
-calculate_minutes_to_midnight = function(input_df){ # take parsed JW-P data
-  df=c()                              # return min from midnight to int midpoint
-  df$a = hm(input_df$df1) # convert to hour minute notation!
-  df$b = hm(input_df$df4)
-  df = as.data.frame(df)
+    parsed_j = separate_wider_delim(df, cols = everything(), delim = " ", names_sep = "")
+    parsed_j = parsed_j[-c(2,3,5)]
+    df=c()                              # return min from midnight to int midpoint
+    df$a = hm(parsed_j$df1) # convert to hour minute notation!
+    df$b = hm(parsed_j$df4)
+    df = as.data.frame(df)
+    df$dif = df$b - df$a # calculate the number of mins in each interval
   
-  df$dif = df$b - df$a # calculate the number of mins in each interval
-  
-  df$interval_length = as.numeric(df$dif) # make values numeric for easier math
-  df$interval_length = df$interval_length/60 # put back into minutes
-  df$interval_midpoint = df$interval_length/2 # this gives us the midpoint 
-  for (i in 1:nrow(df)){ # loop through data, calculating midnight from midnight
-    if (i == 1){
-      df$minutes_from_md_to_interval_start[i] = 0
-      df$minutes_from_md_to_interval_midpoint[i] = df$interval_midpoint[i]
-    } else {
-    df$minutes_from_md_to_interval_start[i] = 1 + 
-      df$minutes_from_md_to_interval_start[i-1] +
-      df$interval_length[i-1]
-    df$minutes_from_md_to_interval_midpoint[i] =
-      df$minutes_from_md_to_interval_start[i] + df$interval_midpoint[i]
+    df$interval_length = as.numeric(df$dif) # make values numeric for easier math
+    df$interval_length = df$interval_length/60 # put back into minutes
+    df$interval_midpoint = df$interval_length/2 # this gives us the midpoint 
+    for (i in 1:nrow(df)){ # loop through data, calculating midnight from midnight
+      if (i == 1){
+        df$minutes_from_md_to_interval_start[i] = 0
+        df$minutes_from_md_to_interval_midpoint[i] = df$interval_midpoint[i]
+      } else {
+      df$minutes_from_md_to_interval_start[i] = 1 + 
+        df$minutes_from_md_to_interval_start[i-1] +
+        df$interval_length[i-1]
+      df$minutes_from_md_to_interval_midpoint[i] =
+        df$minutes_from_md_to_interval_start[i] + df$interval_midpoint[i]
+      }
     }
-  }
-  return(as.data.frame(df$minutes_from_md_to_interval_midpoint))
-}
+    df = as.data.frame(df$minutes_from_md_to_interval_midpoint)
+    colnames(df) = 'mins'
+   # df = as.numeric(df) # make sure this is the right type!
+    return(df)
+} # this returns a reference df that we will use for converting JWAP/JWDP values to minutes since midnight form
 
-full_minute_conversion = function(input_col){
-    data = initial_convert_to_time() 
-    mins = calculate_minutes_to_midnight(data)
-    colnames(mins) = "mins"
-    mins = as.data.frame(mins)
-    # The indexing on JWAP/JWDP counts up from 1; we can use the values to index our JWAP_mins to transform to the appropriate values:
+
+# this function takes the JWAP/JWDP column in our API data along with the comparison df generated from generate_minute_conversion_reference()
+convert_minutes = function(input_col, comp){
     for (i in 1:length(input_col)){
-      if (input_col[i] == 0){
-        next
+      if (input_col[i] == 0){ 
+        next # if the value is 0, we keep it at 0
       } else {
         val = input_col[i]
-        input_col[i] = mins$mins[val]
+        input_col[i] = comp$mins[val]  # if value != 0, we replace value with the appropriate number of minutes from midnight in our reference df
       }
     }
   return(input_col)
 }
-input_col = tibble_name$JWAP
-input_col[4]
 
-input_url = "https://api.census.gov/data/2022/acs/acs1/pums?get=JWAP,SEX,PWGTP&for=state:19"
-tibble_maker(input_url)
-JWAP_mins$JWAP_mins[179]
-  
+# together, these functions let us convert our JWAP/JWDP values into minutes since midnight. Then, they simply need to replace the pre-existing variable!
+```
+
+Let's make one more helper function for all of our categorical variables. This will just take in the categorical variable given and convert the levels of that variable into the appropriate factor levels:
+
+```{r}
+# convert factors to appropraite levels
+convert_factors = function(input_col, var_name){ # change given vector to time
+  # first, grab the json appropriate for variable 
+    temp = httr::GET(paste0("https://api.census.gov/data/2022/acs/acs1/pums/variables/", var_name, ".json"))
+    #turn reference json  into a list
+    temp_list = temp$content |> rawToChar() |>jsonlite::fromJSON()
+    #grab just the names and values
+    j = temp_list$values$item
+    #reorder just so it is clearer
+    j_values = j[sort(names(j))]
+    val = c() # kick up an empty vector
+    for (i in 1:length(j_values)){
+      val[i] = j_values[[i]]
+    }
+    if (var_name != "SEX"){
+      output = factor(input_col, levels = as.character(0:(length(j_values)-1)), labels = val)
+    } else { # SEX has no 0 value, so we need to specify this separately
+      output = factor(input_col, levels = c(1,2), labels = val)
+    }
+    return(output)
 }
 
-test1 = convert_to_time(temp_list)
-test= calculate_minutes_to_midnight(test1)
-test
+# This function will convert our categorical variables into lovely factors, using the names drawn from the online census data!
 ```
 
-```{r}
-test = (one_year_api())
-test
+## Updating our tibble_maker() function with helper functions
 
-
-summary.census <- function(tibble, num_var, cat_var){
-sum = sum(num_var*)
-sum}
-
-
-```
+Now that we've written our helper functions for converting time and factor levels, we can look to update our tibble_maker() function. Our plan will be to update the tibble_maker() function so that we can still use the one_year_api() as it was above without further edits.
 
 ```{r}
-# let's recreate our tibble_maker() function with added capabilities
-input_url = "https://api.census.gov/data/2022/acs/acs1/pums?get=JWDP,SEX,PWGTP&for=state:19"
-
+# let's recreate our tibble_maker() function with added helper function capability
 tibble_maker = function(input_url, tibble_name){
   d = httr::GET(input_url) # get the data from the URL
   parse = fromJSON(rawToChar(d$content)) # convert this our of JSON format
   colnames(parse) = parse[1,] # names are in the first row, so grab these
   tibble_name = as_tibble(parse, .name_repairs = 'unique') # specify rownames are in matrix
   tibble_name = tibble_name[-1,]# drop the row which has the tibble names in it
-  tibble_name$JWAP = as.numeric(tibble_name$JWAP)
+  
+  # make sure our numeric types are correct before we continue; factors will be
+  # converted later with our helper function
+  tibble_name[[1]] = as.numeric(tibble_name[[1]])
+  tibble_name[[3]] = as.numeric(tibble_name[[3]])
+
+  
   # this is where we add the new components to adjust each var type!
   if ("JWAP" %in% names(tibble_name)){
-    tibble_name$JWAP = full_minute_conversion(tibble_name$JWAP)
+    comp = generate_minute_conversion_reference("JWAP") # make comparison df
+    tibble_name$JWAP = convert_minutes(tibble_name$JWAP, comp)
   }
   if ("JWDP" %in% names(tibble_name)){ # use same function for both time vars
-    tibble_name$JWDP = full_minute_conversion(tibble_name$JWDP)
+    comp = generate_minute_conversion_reference("JWDP") # make comparisons df
+    tibble_name$JWDP = convert_minutes(tibble_name$JWDP, comp)
   }
-}
-tibble_maker(input_url)
-```
-
-```{r}
-# let's recreate our tibble_maker() function with added capabilities
-tibble_maker = function(input_url, tibble_name){
-  d = httr::GET(input_url) # get the data from the URL
-  parse = fromJSON(rawToChar(d$content)) # convert this our of JSON format
-  colnames(parse) = parse[1,] # names are in the first row, so grab these
-  tibble_name = as_tibble(parse, .name_repairs = 'unique') # specify rownames are in matrix
-  tibble_name = tibble_name[-1,]# drop the row which has the tibble names in it
+  
+  cat_name = names(tibble_name[2])
+  tibble_name[2] = convert_factors(tibble_name[[2]], cat_name) 
+  
+  # set the unique class of our tibble for future functions:
+  class(tibble_name) <- c("census", class(tibble_name))
   return(tibble_name)
 }
-input_url = "https://api.census.gov/data/2022/acs/acs1/pums?get=JWAP,SEX,PWGTP&for=state:19"
-tibble_maker(input_url)
-
-
-JWAP_data = convert_to_time(tibble_name$JWAP) 
-    JWAP_mins = calculate_minutes_to_midnight(JWAP_data)
-    colnames(JWAP_mins) = "JWAP_mins"
-    tibble_name$JWAP2 = tibble_name$JWAP
-    # The indexing on JWAP/JWDP counts up from 1; we can use the values to index our JWAP_mins to transform to the appropriate values:
-    for (i in 1:nrow(tibble_name)){
-      if (tibble_name$JWAP[i] == 0){
-        next
-      } else {
-        val = tibble_name$JWAP[i]
-        tibble_name$JWAP[i] = JWAP_mins$JWAP_mins[val]
-      }
-    }
-  }
+# setup test url, with JWAP and SCHL as our num and cat variables
+input_url = "https://api.census.gov/data/2022/acs/acs1/pums?get=JWAP,SCHL,PWGTP&for=state:19"
+test_tibble = tibble_maker(input_url, test_tibble)
+head(test_tibble) # looks good!
 ```
+
+## Create multi-year function
+
+Awesome, now our function converts specified variables into the right kinds! Now let's make it so we can call multiple years at once. We'll assume that our users will be interested in comparing the same variables across years, so we will not build in the ability to search for different variables across different years. We'll output our data into a single tibble with the year as a new variable column:
+
+```{r}
+l = list() # we'll put our one year dfs in here before combining
+multi_year_api = function(years = c(2022), num = 'AGEP', cat = 'SEX', loc_type= "STATE", loc_num = "19"){ # specify years as c(year1,year2,etc); by default this is just c(2022)
+  x = length(years)
+  tib = c()
+  for (i in 1:x){
+    tib = one_year_api(year = years[i])#, num, cat, loc_type, loc_num)
+    tib$year = years[i] # add in the year column
+    l[[i]] = tib # store these outside the loop
+    }
+  final_tibble = do.call(rbind, l) #use do.call so we can get all years in one tib!
+}
+
+# let's do a quick test:
+test=multi_year_api(c(2022,2021,2019))  
+nrow(test) 
+# success! We won't print this out (very long!!)
+```
+
+## Make Summary/Plotting Functions
+
+Now, we have our completed functions. Finally let's look at some person-level outcomes using the summary/plotting functions provided. We gave our tibble_maker() outputs a new 'census' class, which we will use in our upcoming functions:
+
+```{r}
+# set up the census summary function:
+summary.census = function(tibble, num_var, cat_var){
+  mean = sum(tibble[[num_var]]*tibble$PWGTP/sum(tibble$PWGTP))
+  sd = (sum(tibble[[num_var]]^2*tibble$PWGTP)/(sum(tibble$PWGTP)-mean^2))
+  cat_summary = table(tibble[[cat_var]])
+  return(list(mean, sd, cat_summary))
+}
+
+plot.census = function(tibble, num_var, cat_var){
+  ggplot(tibble,
+    aes(x = get(cat_var), y = get(num_var), weight = PWGTP)) +
+    geom_boxplot()
+}
+ # put this in your setup code chunk
+
+data = one_year_api(year = 2011)
+summary.census(data, "AGEP", "SEX")
+plot.census(data, "AGEP", "SEX")
+```
+
+From our example data above, we can see that the average age of our participants is \~38.4, and that the number of Males and Females is approximately an even split. Plotting these variables lets us visualize those trends more easily; although the Female boxplot is a little big higher than the Male boxplot, the two look very similar.
+
+## In Conclusion
+
+In conclusion, we have now produced a set of functions that will allow our users to submit a query to the online census database, retrieve data
